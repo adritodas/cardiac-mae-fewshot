@@ -20,9 +20,38 @@ class SpatiotemporalMAE(nn.Module):
             nn.BatchNorm3d(embed_dim),
             nn.ReLU()
         )
-        
-        # TODO: Implement Decoder
+
+        # 3D Decoder: Reconstructs the original sequence from the latent space
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose3d(embed_dim, 32, kernel_size=(1, 4, 4), stride=(1, 2, 2), padding=(0, 1, 1)),
+            nn.ReLU(),
+            nn.ConvTranspose3d(32, 1, kernel_size=(1, 4, 4), stride=(1, 2, 2), padding=(0, 1, 1)),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
-        # TODO: Implement masking logic and forward pass
-        pass
+        # Permute from (B, T, C, H, W) -> (B, C, T, H, W) for 3D convolutions
+        x = x.permute(0, 2, 1, 3, 4)
+
+        # Apply random spatiotemporal masking during training
+        if self.training:
+            mask = (torch.rand_like(x) > self.mask_ratio).float()
+            masked_x = x * mask
+        else:
+            masked_x = x
+            mask = torch.ones_like(x)
+
+        # Forward pass through Encoder and Decoder
+        latent = self.encoder(masked_x)
+        reconstructed = self.decoder(latent)
+
+        # Ensure output perfectly matches input dimensions via trilinear interpolation
+        reconstructed = nn.functional.interpolate(
+            reconstructed,
+            size=(x.shape[2], x.shape[3], x.shape[4]),
+            mode='trilinear',
+            align_corners=False
+        )
+
+        # Permute back to (B, T, C, H, W) before returning
+        return reconstructed.permute(0, 2, 1, 3, 4), mask.permute(0, 2, 1, 3, 4)
