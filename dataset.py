@@ -47,3 +47,27 @@ class CardiacSequenceDataset(Dataset):
             sequence_tensors.append(tensor_image)
 
         return torch.stack(sequence_tensors)
+    
+def get_dataloaders(data_dir=None, batch_size=1):
+    if data_dir is None:
+        for root, dirs, files in os.walk('/kaggle/input'):
+            for d in dirs:
+                if d.startswith('SCD2001'):
+                    data_dir = root
+                    break
+            if data_dir is not None:
+                break
+
+    all_patients = sorted([d for d in os.listdir(data_dir) if d.startswith('SCD2001')])
+    train_patients = all_patients[:9]
+    val_patients = all_patients[9:]
+
+    transform = transforms.Resize((224, 224))
+
+    train_dataset = CardiacSequenceDataset(data_dir, train_patients, transform=transform)
+    val_dataset = CardiacSequenceDataset(data_dir, val_patients, transform=transform)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader, train_dataset, val_dataset, train_patients, val_patients
