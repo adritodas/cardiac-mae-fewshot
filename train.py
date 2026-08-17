@@ -6,53 +6,58 @@ from model import SpatiotemporalMAE
 
 def train_mae():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}") # just to check if gpu is actually working
 
-    # 1. Load Data Splits
     train_loader, val_loader, _, _, _, _ = get_dataloaders(batch_size=1)
 
-    # 2. Initialize Architecture & Loss
-    model = SpatiotemporalMAE(mask_ratio=0.75).to(device)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    mae_net = SpatiotemporalMAE(mask_ratio=0.75).to(device)
+    loss_fn = nn.MSELoss()
+    
+    # Adam worked way better than SGD here
+    # opt = optim.SGD(mae_net.parameters(), lr=0.01)
+    opt = optim.Adam(mae_net.parameters(), lr=1e-3)
 
-    epochs = 15
-    print("Starting MAE Pre-training...")
+    total_epochs = 15
+    print("Kicking off MAE Pre-training...")
 
-    # 3. Pre-Training Loop
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
+    for epoch in range(total_epochs):
+        mae_net.train()
+        epoch_loss_tracker = 0.0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             batch = batch.to(device)
-            optimizer.zero_grad()
+            opt.zero_grad()
 
-            reconstructed, mask = model(batch)
-            # Compute loss ONLY on the masked regions (unseen 75%)
-            loss = criterion(reconstructed * (1 - mask), batch * (1 - mask))
+            recon_out, mask_tensor = mae_net(batch)
+            
+            # Compute loss ONLY on the hidden 75%
+            # (1 - mask_tensor) selects the masked pixels
+            actual_loss = loss_fn(recon_out * (1 - mask_tensor), batch * (1 - mask_tensor))
 
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
+            actual_loss.backward()
+            opt.step()
+            epoch_loss_tracker += actual_loss.item()
 
-        print(f"Epoch [{epoch+1}/{epochs}] - Train Loss: {running_loss/len(train_loader):.4f}")
+        print(f"--> Done with epoch {epoch+1}, average loss: {epoch_loss_tracker/len(train_loader):.5f}")
 
-    # 4. Validation Evaluation (Unseen Patients)
-    model.eval()
-    val_loss = 0.0
+    print("Starting validation check on unseen patients...")
+    mae_net.eval()
+    total_val_loss = 0.0
+    
     with torch.no_grad():
         for batch in val_loader:
             batch = batch.to(device)
-            reconstructed, mask = model(batch)
-            loss = criterion(reconstructed * (1 - mask), batch * (1 - mask))
-            val_loss += loss.item()
+            recon_out, mask_tensor = mae_net(batch)
+            
+            val_err = loss_fn(recon_out * (1 - mask_tensor), batch * (1 - mask_tensor))
+            total_val_loss += val_err.item()
 
-    avg_val_loss = val_loss / len(val_loader)
-    print(f"\nValidation Reconstruction Loss (Unseen Patients): {avg_val_loss:.4f}")
+    final_val = total_val_loss / len(val_loader)
+    print(f"Validation Loss (Unseen): {final_val:.5f}")
 
-    # 5. Save Weights Checkpoint
-    torch.save(model.state_dict(), "mae_frozen_encoder.pth")
-    print("Model checkpoint saved to mae_frozen_encoder.pth")
+    # save the weights
+    torch.save(mae_net.state_dict(), "mae_frozen_encoder.pth")
+    print("Saved weights to mae_frozen_encoder.pth!")
 
 if __name__ == "__main__":
     train_mae()
